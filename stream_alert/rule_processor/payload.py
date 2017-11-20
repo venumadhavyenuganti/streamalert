@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from abc import ABCMeta, abstractmethod, abstractproperty
-from logging import DEBUG as LOG_LEVEL_DEBUG
-from urllib import unquote
 import base64
+from collections import namedtuple, OrderedDict
 import gzip
+from logging import DEBUG as LOG_LEVEL_DEBUG
 import os
 import tempfile
 import time
+from urllib import unquote
 import zlib
 
 import boto3
@@ -28,43 +29,63 @@ import boto3
 from stream_alert.rule_processor import FUNCTION_NAME, LOGGER
 from stream_alert.shared.metrics import MetricLogger
 
+SERVICE = namedtuple('ServiceMapper', 'payload_class extract_resource')
 
-def load_stream_payload(service, entity, raw_record):
+
+def load_stream_payload(raw_record):
     """Returns the right StreamPayload subclass for this service
 
     Args:
-        service (str): service name to load class for
-        entity (str): entity for this service
         raw_record (str): record raw payload data
     """
-    payload_map = {'s3': S3Payload,
-                   'sns': SnsPayload,
-                   'kinesis': KinesisPayload,
-                   'stream_alert_app': StreamAlertAppPayload}
+    # Keys are capitalized per logs from each service
+    payload_mapper = {
+        'kinesis': SERVICE(
+            KinesisPayload,
+            lambda r: r['eventSourceARN'].split('/')[1]),
+        's3': SERVICE(
+            S3Payload,
+            lambda r: r['s3']['bucket']['name']),
+        'Sns': SERVICE(
+            SnsPayload,
+            lambda r: r['EventSubscriptionArn'].split(':')[5]),
+        'stream_alert_app': SERVICE(
+            StreamAlertAppPayload,
+            lambda r: r['stream_alert_app'])}
 
-    if service not in payload_map:
-        LOGGER.error('Service payload not supported: %s', service)
-        return
+    # Set default strings for service and resource
+    service, resource = '', ''
 
-    return payload_map[service](raw_record=raw_record, entity=entity)
+    # Extract the service (kinesis, s3, sns, etc) and resource (stream name, s3 bucket, etc)
+    # from the raw record
+    for service_name, service_mapper in payload_mapper.iteritems():
+        if service_name in raw_record:
+            service = service_name
+            resource = service_mapper.extract_resource(raw_record)
+            break
+
+    if not service:
+        LOGGER.error('Unsupported service found, skipping...\n%s', raw_record)
+        return False
+
+    if not resource:
+        LOGGER.error('Unable to extract the resource of %s from the record %s', service, raw_record)
+        return False
+
+    # Create the payload object
+    return payload_mapper[service].payload_class(raw_record=raw_record, resource=resource)
 
 
 class StreamPayload(object):
     """Container class for the StreamAlert payload object.
 
     Attributes:
-        entity (str): The name of the sending service. Can be a kinesis stream name,
-            SNS topic, or S3 bucket name.
-
-        raw_record: The record from the AWS Lambda Records dictionary.
-
-        log_source (str): The name of the logging application which the data
-            originated from.  This could be osquery, auditd, etc.
-
-        records (list): A list of parsed and typed record(s).
-
-        type (str): The data type of the record - json, csv, syslog, etc.
-
+        service (str): The originating service used to deliver the log.
+        resource (str): A resource to a service - Kinesis stream, SNS topic, S3 bucket, etc.
+        raw_record (dict): An unparsed record passed into the Lambda handler.
+        log_source (str): The name of the classified log where data originated from.
+        records (list): A list of parsed and typed records.
+        type (str): The data type of the parsed record. Could be json, csv, syslog, etc.
         valid (bool): Whether the record is deemed valid by parsing and classification.
     """
     __metaclass__ = ABCMeta
@@ -74,27 +95,27 @@ class StreamPayload(object):
         Keyword Args:
             raw_record (dict): The record to be parsed - in AWS event format
         """
+        # Set preliminary attributes
         self.raw_record = kwargs['raw_record']
-        self.entity = kwargs['entity']
+        self.resource = kwargs['resource']
         self.pre_parsed_record = None
+        self.configured_logs_for_resource = None
+        self._resource_exclude_expressions = None
 
-        self._refresh_record(None)
+        # Prepare the payload
+        self._refresh_record()
 
     def __repr__(self):
-        repr_str = (
-            '<{} valid:{} log_source:{} entity:{} '
-            'type:{} record:{}>'
-            ).format(
-                self.__class__.__name__, self.valid,
-                self.log_source, self.entity,
-                self.type, self.records
-                )
+        repr_str = ('<{} valid:{} log_source:{} resource:{} '
+                    'type:{} record:{}>').format(self.__class__.__name__, self.valid,
+                                                 self.log_source, self.resource, self.type,
+                                                 self.records)
 
         return repr_str
 
     @abstractproperty
     def service(self):
-        """Read only service property enforced on subclasses.
+        """The AWS service the payload originated from.
 
         Returns:
             str: The service name for this payload type.
@@ -112,7 +133,7 @@ class StreamPayload(object):
                 payloads, such as those similar to S3.
         """
 
-    def _refresh_record(self, new_record):
+    def _refresh_record(self, new_record=None):
         """Replace the currently loaded record with a new one.
 
         Used mainly when S3 is used as a source, due to looping over files
@@ -127,6 +148,33 @@ class StreamPayload(object):
         self.records = None
         self.type = None
         self.valid = False
+
+    def load_logs_for_source(self, config):
+        """Load a mapping of all potential logs for the payload's resource
+
+        Args:
+            config (dict): The loaded StreamAlert config
+        """
+        resources_for_service = config['sources'].get(self.service())
+        if not resources_for_service:
+            LOGGER.error('Service [%s] not declared in sources.json configuration', self.service())
+            return False
+
+        resource_log_config = resources_for_service.get(self.resource)
+        if not resource_log_config:
+            LOGGER.error(
+                'Resource [%s] not declared in sources.json configuration for service [%s]',
+                self.resource, self.service())
+            return False
+
+        # Load custom configuration settings here
+        self._resource_exclude_expressions = resource_log_config.get('exclude', [])
+
+        self.configured_logs_for_resource = OrderedDict(
+            (log_name, config['logs'][log_name]) for log_name in config['logs'].keys()
+            if log_name.split(':')[0] in resource_log_config['logs'])
+
+        return bool(self.configured_logs_for_resource)
 
 
 class S3ObjectSizeError(Exception):
@@ -175,13 +223,9 @@ class S3Payload(StreamPayload):
                 avg_record_size = ((processed_size - 1) / line_num)
                 if avg_record_size:
                     approx_record_count = self.s3_object_size / avg_record_size
-                    LOGGER.debug(
-                        'Processed %s S3 records out of an approximate total of %s '
-                        '(average record size: %s bytes, total size: %s bytes)',
-                        line_num,
-                        approx_record_count,
-                        avg_record_size,
-                        self.s3_object_size)
+                    LOGGER.debug('Processed %s S3 records out of an approximate total of %s '
+                                 '(average record size: %s bytes, total size: %s bytes)', line_num,
+                                 approx_record_count, avg_record_size, self.s3_object_size)
 
         MetricLogger.log_metric(FUNCTION_NAME, MetricLogger.TOTAL_S3_RECORDS, line_num)
 
@@ -249,8 +293,8 @@ class S3Payload(StreamPayload):
         key = unquoted(self.raw_record['s3']['object']['key'])
         self.s3_object_size = int(self.raw_record['s3']['object']['size'])
 
-        LOGGER.debug('Pre-parsing record from S3. Bucket: %s, Key: %s, Size: %d',
-                     bucket, key, self.s3_object_size)
+        LOGGER.debug('Pre-parsing record from S3. Bucket: %s, Key: %s, Size: %d', bucket, key,
+                     self.s3_object_size)
 
         return self._download_object(region, bucket, key)
 
@@ -299,10 +343,8 @@ class SnsPayload(StreamPayload):
         Yields:
             This object with the pre_parsed_record now set
         """
-        LOGGER.debug(
-            'Pre-parsing record from SNS. MessageId: %s, EventSubscriptionArn: %s',
-            self.raw_record['Sns']['MessageId'],
-            self.raw_record['EventSubscriptionArn'])
+        LOGGER.debug('Pre-parsing record from SNS. MessageId: %s, EventSubscriptionArn: %s',
+                     self.raw_record['Sns']['MessageId'], self.raw_record['EventSubscriptionArn'])
 
         self.pre_parsed_record = self.raw_record['Sns']['Message']
 

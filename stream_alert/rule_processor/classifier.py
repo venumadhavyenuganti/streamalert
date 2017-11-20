@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from collections import namedtuple, OrderedDict
+from collections import namedtuple
 import json
 
 from stream_alert.rule_processor import LOGGER, LOGGER_DEBUG_ENABLED
@@ -27,103 +27,10 @@ SUPPORT_MULTIPLE_SCHEMA_MATCHING = False
 
 
 class StreamClassifier(object):
-    """Classify, map source, and parse a raw record into its declared type."""
+    """Parse and classify raw record into a declared log."""
 
     def __init__(self, config):
         self._config = config
-        self._entity_log_sources = []
-
-    @staticmethod
-    def extract_service_and_entity(raw_record):
-        """Extract the originating AWS service and corresponding entity
-        from a raw record.
-
-        Each raw record contains a set of keys that represent its source.
-        A Kinesis record will contain a `kinesis` key while a
-        S3 record contains `s3` and an SNS record contains an `Sns` key
-
-        Args:
-            raw_record (dict): A raw payload as a dictionary
-
-        Returns:
-            str: The AWS service which sent the record
-            str: The specific instance of a service which sent the record
-        """
-        # Sns is capitalized below because this is how AWS stores it within the Record
-        # Other services, like s3, are not stored like this. Do not alter it!
-        entity_mapper = {
-            'kinesis': lambda r: r['eventSourceARN'].split('/')[1],
-            's3': lambda r: r['s3']['bucket']['name'],
-            'Sns': lambda r: r['EventSubscriptionArn'].split(':')[5],
-            'stream_alert_app': lambda r: r['stream_alert_app']
-        }
-
-        service, entity = '', ''
-        # check raw record for either kinesis, s3, or sns keys
-        for key, map_function in entity_mapper.iteritems():
-            if key in raw_record:
-                service = key.lower()
-                # map the entity name from a record
-                entity = map_function(raw_record)
-                break
-
-        return service, entity
-
-    def load_sources(self, service, entity):
-        """Load the sources for this payload.
-
-        Args:
-            service (str): Source service
-            entity (str): Entity within the service
-
-        Returns:
-            bool: True if the entity's log sources loaded properly
-        """
-        # Clear the list from any previous runs
-        del self._entity_log_sources[:]
-
-        # Get all logs for the configured service/entity (s3, kinesis, or sns)
-        service_entities = self._config['sources'].get(service)
-        if not service_entities:
-            LOGGER.error('Service [%s] not declared in sources configuration',
-                         service)
-            return False
-
-        config_entity = service_entities.get(entity)
-        if not config_entity:
-            LOGGER.error(
-                'Entity [%s] not declared in sources configuration for service [%s]',
-                entity,
-                service)
-            return False
-
-        # Get a copy of the logs list by slicing here, not a pointer to the list reference
-        self._entity_log_sources = config_entity['logs'][:]
-
-        return bool(self._entity_log_sources)
-
-    def get_log_info_for_source(self):
-        """Return a mapping of all log sources to a given entity with attributes.
-
-        Returns:
-            dict: log sources and their attributes for the entity:
-            {
-                'log_source_1': {
-                    'parser': 'json',
-                    'keys': [ 'key1', 'key2', ..., 'keyn']
-                },
-                'log_source_n': {
-                    'parser': 'csv',
-                    'keys': ['field1', 'field2', ..., 'fieldn'],
-                    'log_patterns': ['*pattern1*']
-                }
-            }
-        """
-        # Get the logs configuration
-        logs = self._config['logs']
-
-        return OrderedDict((source, logs[source]) for source in logs.keys()
-                           if source.split(':')[0] in self._entity_log_sources)
 
     @time_me
     def classify_record(self, payload):
@@ -140,7 +47,7 @@ class StreamClassifier(object):
         parse_result = self._parse(payload)
         if all([parse_result,
                 payload.service(),
-                payload.entity,
+                payload.resource,
                 payload.type,
                 payload.log_source,
                 payload.records]):
@@ -192,25 +99,24 @@ class StreamClassifier(object):
 
         return schema_matches[0]
 
+    @staticmethod
     @time_me
-    def _process_log_schemas(self, payload):
+    def _process_log_schemas(payload):
         """Get any log schemas that matched this log format
 
         Args:
-            payload: A StreamAlert payload object
+            payload (StreamPayload): The payload to classify
 
         Returns:
-            list: Contains any schemas that matched this log format
+            list: Contains schemas that matched this log format
                 Each list entry contains the namedtuple of 'SchemaMatch' with
-                values of log_name, root_schema, parser, and parsed_data
+                values of (log_name, root_schema, parser, and parsed_data)
         """
         schema_match = namedtuple('SchemaMatch',
                                   'log_name, root_schema, parser, parsed_data')
         schema_matches = []
-        log_info = self.get_log_info_for_source()
 
-        # Loop over all logs declared in logs.json
-        for log_name, attributes in log_info.iteritems():
+        for log_name, attributes in payload.configured_logs_for_resource.iteritems():
             # Get the parser type to use for this log
             parser_name = payload.type or attributes['parser']
 
