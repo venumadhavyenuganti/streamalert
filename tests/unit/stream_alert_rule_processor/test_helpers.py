@@ -135,11 +135,16 @@ def make_kinesis_raw_record(kinesis_stream, kinesis_data):
 def make_sns_raw_record(topic_name, sns_data):
     """Helper for creating the sns raw record"""
     raw_record = {
-        'EventSource': 'aws:kinesis',
+        'EventVersion': '1.0',
+        'EventSource': 'aws:sns',
         'EventSubscriptionArn': 'arn:aws:sns:us-east-1:123456789012:{}'.format(topic_name),
         'Sns': {
             'MessageId': 'unit test message id',
-            'Message': sns_data}}
+            'Message': sns_data,
+            'Type': 'Notification',
+            'Subject': 'TestSubject'
+        }
+    }
     return raw_record
 
 

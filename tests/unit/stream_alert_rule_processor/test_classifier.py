@@ -36,18 +36,18 @@ class TestStreamClassifier(object):
 
     def __init__(self):
         self.classifier = None
+        self.config = load_config('tests/unit/conf')
 
     def setup(self):
         """Setup before each method"""
-        config = load_config('tests/unit/conf')
-        self.classifier = sa_classifier.StreamClassifier(config)
+        self.classifier = sa_classifier.StreamClassifier(self.config)
 
-    def _prepare_and_classify_payload(self, service, entity, raw_record):
+    def _prepare_and_classify_payload(self, raw_record):
         """Helper method to return a preparsed and classified payload"""
-        payload = load_stream_payload(service, entity, raw_record)
+        payload = load_stream_payload(raw_record)
+        payload.load_logs_for_source(self.config)
 
         payload = list(payload.pre_parse())[0]
-        self.classifier.load_sources(service, entity)
         self.classifier.classify_record(payload)
 
         return payload
@@ -187,104 +187,17 @@ class TestStreamClassifier(object):
         # Make sure the list was not modified
         assert_equal(payload['streamalert:envelope_keys'], 'bad_value')
 
-    def test_service_entity_ext_kinesis(self):
-        """StreamClassifier - Extract Service and Entity, Kinesis"""
-        raw_record = {
-            'kinesis': {
-                'data': 'SGVsbG8sIHRoaXMgaXMgYSB0ZXN0IDEyMy4='
-            },
-            'eventSourceARN': 'arn:aws:kinesis:EXAMPLE/unit_test_stream_name'
-        }
-
-        service, entity = self.classifier.extract_service_and_entity(raw_record)
-
-        assert_equal(service, 'kinesis')
-        assert_equal(entity, 'unit_test_stream_name')
-
-    def test_service_entity_ext_s3(self):
-        """StreamClassifier - Extract Service and Entity, S3"""
-        raw_record = {
-            's3': {'bucket': {'name': 'unit_test_bucket'}}
-        }
-
-        service, entity = self.classifier.extract_service_and_entity(raw_record)
-
-        assert_equal(service, 's3')
-        assert_equal(entity, 'unit_test_bucket')
-
-    def test_service_entity_ext_sns(self):
-        """StreamClassifier - Extract Service and Entity, SNS"""
-        raw_record = {
-            'Sns': {'Message': 'test_message'},
-            'EventSubscriptionArn': 'arn:aws:sns:us-east-1:123456789012:unit_test_topic'
-        }
-
-        service, entity = self.classifier.extract_service_and_entity(raw_record)
-
-        assert_equal(service, 'sns')
-        assert_equal(entity, 'unit_test_topic')
-
-    def test_load_sources_valid(self):
-        """StreamClassifier - Load Log Sources for Service and Entity, Valid"""
-        service, entity = 'kinesis', 'unit_test_default_stream'
-
-        result = self.classifier.load_sources(service, entity)
-
-        assert_true(result)
-
-        assert_equal(self.classifier._entity_log_sources[0], 'unit_test_simple_log')
-
-    @patch('logging.Logger.error')
-    def test_load_sources_invalid_serv(self, log_mock):
-        """StreamClassifier - Load Log Sources for Service and Entity, Invalid Service"""
-        service = 'kinesys'
-
-        result = self.classifier.load_sources(service, '')
-
-        assert_false(result)
-
-        log_mock.assert_called_with('Service [%s] not declared in sources configuration',
-                                    service)
-
-    @patch('logging.Logger.error')
-    def test_load_sources_invalid_ent(self, log_mock):
-        """StreamClassifier - Load Log Sources for Service and Entity, Invalid Entity"""
-        service, entity = 'kinesis', 'unit_test_bad_stream'
-
-        result = self.classifier.load_sources(service, entity)
-
-        assert_false(result)
-
-        log_mock.assert_called_with(
-            'Entity [%s] not declared in sources configuration for service [%s]',
-            entity,
-            service
-        )
-
-    def test_get_log_info(self):
-        """StreamClassifier - Load Log Info for Source"""
-        self.classifier._entity_log_sources.append('unit_test_simple_log')
-
-        logs = self.classifier.get_log_info_for_source()
-
-        assert_list_equal(logs.keys(), ['unit_test_simple_log'])
-
     @patch('logging.Logger.error')
     def test_parse_convert_fail(self, log_mock):
         """StreamClassifier - Convert Failed"""
-        service, entity = 'kinesis', 'unit_test_default_stream'
-
-        result = self.classifier.load_sources(service, entity)
-
-        assert_true(result)
-
         kinesis_data = json.dumps({
             'unit_key_01': 'not an integer',
             'unit_key_02': 'valid string'
         })
 
-        raw_record = make_kinesis_raw_record(entity, kinesis_data)
-        payload = load_stream_payload(service, entity, raw_record)
+        raw_record = make_kinesis_raw_record('unit_test_default_stream', kinesis_data)
+        payload = load_stream_payload(raw_record)
+        payload.load_logs_for_source(self.config)
         payload = list(payload.pre_parse())[0]
 
         result = self.classifier._parse(payload)
@@ -308,11 +221,9 @@ class TestStreamClassifier(object):
         # Make sure support for multiple schema matching is ON
         sa_classifier.SUPPORT_MULTIPLE_SCHEMA_MATCHING = True
 
-        service, entity = 'kinesis', 'test_stream_2'
-        raw_record = make_kinesis_raw_record(entity, kinesis_data)
-        payload = load_stream_payload(service, entity, raw_record)
-
-        self.classifier.load_sources(service, entity)
+        raw_record = make_kinesis_raw_record('test_stream_2', kinesis_data)
+        payload = load_stream_payload(raw_record)
+        payload.load_logs_for_source(self.config)
 
         payload = list(payload.pre_parse())[0]
 
@@ -337,11 +248,9 @@ class TestStreamClassifier(object):
         })
         sa_classifier.SUPPORT_MULTIPLE_SCHEMA_MATCHING = True
 
-        service, entity = 'kinesis', 'test_stream_2'
-        raw_record = make_kinesis_raw_record(entity, kinesis_data)
-        payload = load_stream_payload(service, entity, raw_record)
-
-        self.classifier.load_sources(service, entity)
+        raw_record = make_kinesis_raw_record('test_stream_2', kinesis_data)
+        payload = load_stream_payload(raw_record)
+        payload.load_logs_for_source(self.config)
 
         payload = list(payload.pre_parse())[0]
 
@@ -366,11 +275,9 @@ class TestStreamClassifier(object):
         })
         sa_classifier.SUPPORT_MULTIPLE_SCHEMA_MATCHING = True
 
-        service, entity = 'kinesis', 'test_stream_2'
-        raw_record = make_kinesis_raw_record(entity, kinesis_data)
-        payload = load_stream_payload(service, entity, raw_record)
-
-        self.classifier.load_sources(service, entity)
+        raw_record = make_kinesis_raw_record('test_stream_2', kinesis_data)
+        payload = load_stream_payload(raw_record)
+        payload.load_logs_for_source(self.config)
 
         payload = list(payload.pre_parse())[0]
 
@@ -406,9 +313,8 @@ class TestStreamClassifier(object):
             }
         })
 
-        service, entity = 'kinesis', 'test_kinesis_stream'
-        raw_record = make_kinesis_raw_record(entity, kinesis_data)
-        payload = self._prepare_and_classify_payload(service, entity, raw_record)
+        raw_record = make_kinesis_raw_record('test_kinesis_stream', kinesis_data)
+        payload = self._prepare_and_classify_payload(raw_record)
 
         # valid record test
         assert_equal(payload.valid, True)
@@ -444,9 +350,8 @@ class TestStreamClassifier(object):
             'key7': False
         })
 
-        service, entity = 'kinesis', 'test_kinesis_stream'
-        raw_record = make_kinesis_raw_record(entity, kinesis_data)
-        payload = self._prepare_and_classify_payload(service, entity, raw_record)
+        raw_record = make_kinesis_raw_record('test_kinesis_stream', kinesis_data)
+        payload = self._prepare_and_classify_payload(raw_record)
 
         # valid record test
         assert_equal(payload.valid, True)
@@ -476,9 +381,8 @@ class TestStreamClassifier(object):
             }
         })
 
-        service, entity = 'kinesis', 'test_kinesis_stream'
-        raw_record = make_kinesis_raw_record(entity, kinesis_data)
-        payload = self._prepare_and_classify_payload(service, entity, raw_record)
+        raw_record = make_kinesis_raw_record('test_kinesis_stream', kinesis_data)
+        payload = self._prepare_and_classify_payload(raw_record)
 
         # valid record test
         assert_equal(payload.valid, True)
@@ -503,9 +407,8 @@ class TestStreamClassifier(object):
         """StreamClassifier - Classify CSV"""
         csv_data = 'jan102017,0100,host1,thisis some data with keyword1 in it'
 
-        service, entity = 'kinesis', 'test_kinesis_stream'
-        raw_record = make_kinesis_raw_record(entity, csv_data)
-        payload = self._prepare_and_classify_payload(service, entity, raw_record)
+        raw_record = make_kinesis_raw_record('test_kinesis_stream', csv_data)
+        payload = self._prepare_and_classify_payload(raw_record)
 
         # valid record test
         assert_equal(payload.valid, True)
@@ -529,9 +432,8 @@ class TestStreamClassifier(object):
             '"chef,web-server,1,10,success"'
         )
 
-        service, entity = 'kinesis', 'test_kinesis_stream'
-        raw_record = make_kinesis_raw_record(entity, csv_nested_data)
-        payload = self._prepare_and_classify_payload(service, entity, raw_record)
+        raw_record = make_kinesis_raw_record('test_kinesis_stream', csv_nested_data)
+        payload = self._prepare_and_classify_payload(raw_record)
 
         # valid record test
         assert_equal(payload.valid, True)
@@ -566,9 +468,8 @@ class TestStreamClassifier(object):
             'rdev=00:00 obj=system_u:object_r:etc_t:s0'
         )
 
-        service, entity = 'kinesis', 'test_kinesis_stream'
-        raw_record = make_kinesis_raw_record(entity, auditd_test_data)
-        payload = self._prepare_and_classify_payload(service, entity, raw_record)
+        raw_record = make_kinesis_raw_record('test_kinesis_stream', auditd_test_data)
+        payload = self._prepare_and_classify_payload(raw_record)
 
         # valid record test
         assert_equal(payload.valid, True)
@@ -600,9 +501,8 @@ class TestStreamClassifier(object):
         fixtures = {'test_1': test_data_1, 'test_2': test_data_2}
         for name, syslog_message in fixtures.iteritems():
 
-            service, entity = 'kinesis', 'test_stream_2'
-            raw_record = make_kinesis_raw_record(entity, syslog_message)
-            payload = self._prepare_and_classify_payload(service, entity, raw_record)
+            raw_record = make_kinesis_raw_record('test_stream_2', syslog_message)
+            payload = self._prepare_and_classify_payload(raw_record)
 
             # valid record test
             assert_equal(payload.valid, True)
