@@ -97,13 +97,13 @@ def _validate_config(config):
 
     # Iterate over each defined source and make sure the required subkeys exist
     for attrs in config['sources'].values():
-        for entity, entity_attrs in attrs.iteritems():
-            if 'logs' not in entity_attrs:
-                raise ConfigError('Missing \'logs\' key for entity: {}'.format(entity))
+        for resource, resource_attrs in attrs.iteritems():
+            if 'logs' not in resource_attrs:
+                raise ConfigError('Missing \'logs\' key for resource: {}'.format(resource))
 
-            if not entity_attrs['logs']:
+            if not resource_attrs['logs']:
                 raise ConfigError(
-                    'List of \'logs\' is empty for entity: {}'.format(entity))
+                    'List of \'logs\' is empty for resource: {}'.format(resource))
 
 def load_env(context):
     """Get the current environment for the running Lambda function.

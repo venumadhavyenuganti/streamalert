@@ -45,17 +45,13 @@ class StreamSink(object):
         Sends a message to the alert processor with the following JSON format:
             {
                 "record": record,
-                "metadata": {
-                    "rule_name": rule.rule_name,
-                    "rule_description": rule.rule_function.__doc__,
-                    "log": str(payload.log_source),
-                    "outputs": rule.outputs,
-                    "type": payload.type,
-                    "source": {
-                        "service": payload.service,
-                        "entity": payload.entity
-                    }
-                }
+                "rule_name": rule.rule_name,
+                "rule_description": rule.rule_function.__doc__,
+                "log": str(payload.log_source),
+                "outputs": rule.outputs,
+                "type": payload.type,
+                "source_service": payload.service(),
+                "source_resource": payload.resource
             }
         """
         for alert in alerts:

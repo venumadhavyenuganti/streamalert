@@ -66,7 +66,7 @@ def run(alert, region, function_name, config):
                 'log_type': payload.type,
                 'outputs': rule.outputs,
                 'source_service': payload.service,
-                'source_entity': payload.entity
+                'source_resource': payload.resource
             }
 
         region (str): The AWS region of the currently executing Lambda function

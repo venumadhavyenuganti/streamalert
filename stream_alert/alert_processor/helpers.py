@@ -38,7 +38,7 @@ def validate_alert(alert):
         'log_source',
         'outputs',
         'source_service',
-        'source_entity',
+        'source_resource',
         'context'
     }
     if not set(alert.keys()) == alert_keys:
