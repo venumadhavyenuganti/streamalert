@@ -31,6 +31,15 @@ RuleAttributes = namedtuple('Rule', ['rule_name',
                                      'req_subkeys',
                                      'context'])
 
+Alert = namedtuple('Alert', ['record',
+                             'rule_name',
+                             'rule_description',
+                             'log_source',
+                             'log_format',
+                             'outputs',
+                             'service',
+                             'resource'])
+
 
 class StreamRules(object):
     """Container class for StreamAlert Rules
@@ -67,8 +76,9 @@ class StreamRules(object):
         passed on to the sink(s). If the function returns `False`, the event is
         dropped.
         """
+
         def decorator(rule):
-            """Rule decorator logic."""
+            """Rule decorator logic"""
             rule_name = rule.__name__
             logs = opts.get('logs')
             outputs = opts.get('outputs')
@@ -78,29 +88,20 @@ class StreamRules(object):
             context = opts.get('context', {})
 
             if not (logs or datatypes):
-                LOGGER.error(
-                    'Invalid rule [%s] - rule must have either \'logs\' or \''
-                    'datatypes\' declared',
-                    rule_name)
+                LOGGER.error('Invalid rule [%s] - rule must have either \'logs\' or \''
+                             'datatypes\' declared', rule_name)
                 return
 
             if not outputs:
-                LOGGER.error(
-                    'Invalid rule [%s] - rule must have \'outputs\' declared',
-                    rule_name)
+                LOGGER.error('Invalid rule [%s] - rule must have \'outputs\' declared', rule_name)
                 return
 
             if rule_name in cls.__rules:
                 raise ValueError('rule [{}] already defined'.format(rule_name))
-            cls.__rules[rule_name] = RuleAttributes(rule_name,
-                                                    rule,
-                                                    matchers,
-                                                    datatypes,
-                                                    logs,
-                                                    outputs,
-                                                    req_subkeys,
-                                                    context)
+            cls.__rules[rule_name] = RuleAttributes(rule_name, rule, matchers, datatypes, logs,
+                                                    outputs, req_subkeys, context)
             return rule
+
         return decorator
 
     @classmethod
@@ -110,24 +111,28 @@ class StreamRules(object):
         Matchers are rules which allow you to extract common logic
         into helper functions. Each rule can contain multiple matchers.
         """
+
         def decorator(matcher):
-            """Match decorator."""
+            """Match decorator"""
             name = matcher.__name__
             if name in cls.__matchers:
                 raise ValueError('matcher already defined: {}'.format(name))
             cls.__matchers[name] = matcher
             return matcher
+
         return decorator
 
     @classmethod
     def disable(cls):
         """Disables a rule from being run by removing it from the internal rules dict"""
+
         def decorator(rule):
-            """Rule disable decorator."""
+            """Rule disable decorator"""
             rule_name = rule.__name__
             if rule_name in cls.__rules:
                 del cls.__rules[rule_name]
             return rule
+
         return decorator
 
     def match_event(self, record, rule):
@@ -290,9 +295,7 @@ class StreamRules(object):
                 rule_result = rule.rule_function(record)
         except Exception:  # pylint: disable=broad-except
             rule_result = False
-            LOGGER.exception(
-                'Encountered error with rule: %s',
-                rule.rule_function.__name__)
+            LOGGER.exception('Encountered error with rule: %s', rule.rule_function.__name__)
         return rule_result
 
     @staticmethod
