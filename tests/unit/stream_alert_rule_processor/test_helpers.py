@@ -101,9 +101,17 @@ def get_valid_event(count=1, **kwargs):
         'unit_key_02': 'another bogus value'
     }
     record_data = kwargs.get('record', default_record)
-
     data_json = json.dumps(record_data)
-    raw_record = make_kinesis_raw_record('unit_test_default_stream', data_json)
+
+    resource = kwargs.get('resource', 'unit_test_default_stream')
+    service = kwargs.get('service', 'kinesis')
+
+    if service == 'kinesis':
+        raw_record = make_kinesis_raw_record(resource, data_json)
+    elif service == 'sns':
+        raw_record = make_sns_raw_record(resource, data_json)
+    else:
+        return
 
     return {'Records': [raw_record for _ in range(count)]}
 
@@ -111,11 +119,10 @@ def get_valid_event(count=1, **kwargs):
 def load_and_classify_payload(config, service, entity, raw_record):
     """Return a loaded and classified payload."""
     # prepare the payloads
-    payload = load_stream_payload(service, entity, raw_record)
-
+    payload = load_stream_payload(raw_record)
     payload = list(payload.pre_parse())[0]
+    payload.load_logs_for_source(config=config)
     classifier = StreamClassifier(config=config)
-    classifier.load_sources(service, entity)
     classifier.classify_record(payload)
 
     return payload
@@ -226,7 +233,7 @@ def mock_normalized_records(default_data=None):
     for record in default_data:
         entity = 'unit_test_entity'
         raw_record = make_kinesis_raw_record(entity, 'None')
-        payload = load_stream_payload('kinesis', entity, raw_record)
+        payload = load_stream_payload(raw_record)
         payload = payload.pre_parse().next()
         payload.pre_parsed_record = record
         kinesis_payload.append(payload)

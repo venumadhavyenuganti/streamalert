@@ -278,7 +278,7 @@ def test_s3_download_object(*_):
     """S3Payload - Download Object"""
     key = 'test/unit/s3-object.gz'
     raw_record = make_s3_raw_record('unit_bucket_name', key)
-    s3_payload = load_stream_payload('s3', key, raw_record)
+    s3_payload = load_stream_payload(raw_record)
     S3Payload.s3_object_size = (1024 * 1024)
     downloaded_path = s3_payload._download_object(
         'us-east-1', 'unit_bucket_name', key)
@@ -291,7 +291,7 @@ def test_s3_download_object(*_):
 def test_s3_download_object_zero_size(*_):
     """S3Payload - Download Object of Zero Size"""
     raw_record = make_s3_raw_record('unit_bucket_name', 'unit_key_name', 0)
-    s3_payload = load_stream_payload('s3', 'unit_key_name', raw_record)
+    s3_payload = load_stream_payload(raw_record)
 
     assert_is_none(s3_payload._download_object('us-east-1', 'unit_bucket_name', 'unit_key_name'))
 

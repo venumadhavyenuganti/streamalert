@@ -63,46 +63,31 @@ class TestStreamAlert(object):
 
         assert_list_equal(self.__sa_handler.get_alerts(), default_list)
 
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.load_sources')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_no_sources(self, extract_mock, load_sources_mock):
+    @patch('logging.Logger.error')
+    def test_run_no_sources(self, log_mock):
         """StreamAlert Class - Run, No Loaded Sources"""
-        extract_mock.return_value = ('lambda', 'entity')
-        load_sources_mock.return_value = None
+        self.__sa_handler.run(get_valid_event(1, stream_name='nonexistent_kinesis_stream'))
 
-        self.__sa_handler.run({'Records': ['record']})
-
-        load_sources_mock.assert_called_with('lambda', 'entity')
-
-    @patch('logging.Logger.error')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_bad_service(self, extract_mock, log_mock):
-        """StreamAlert Class - Run, Bad Service"""
-        extract_mock.return_value = ('', 'entity')
-
-        self.__sa_handler.run({'Records': ['record']})
-
-        log_mock.assert_called_with('No valid service found in payload\'s raw record. '
-                                    'Skipping record: %s', 'record')
+        log_mock.assert_called_with('Resource [%s] not declared in '
+                                    'sources.json configuration for service [%s]',
+                                    'nonexistent_kinesis_stream',
+                                    'kinesis')
 
     @patch('logging.Logger.error')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_bad_entity(self, extract_mock, log_mock):
-        """StreamAlert Class - Run, Bad Entity"""
-        extract_mock.return_value = ('kinesis', '')
+    def test_run_bad_entity(self, log_mock):
+        """StreamAlert Class - Run, Unknown Kinesis Resource"""
+        event = get_valid_event(1, service='kinesis', resource=' ')
+        self.__sa_handler.run(event)
 
-        self.__sa_handler.run({'Records': ['record']})
-
-        log_mock.assert_called_with(
-            'Unable to extract entity from payload\'s raw record for '
-            'service %s. Skipping record: %s', 'kinesis', 'record')
+        log_mock.assert_called_with('Resource [%s] not declared in sources.json '
+                                    'configuration for service [%s]',
+                                    ' ',
+                                    'kinesis')
 
     @patch('stream_alert.rule_processor.handler.load_stream_payload')
     @patch('stream_alert.rule_processor.handler.StreamClassifier.load_sources')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
     def test_run_load_payload_bad(
             self,
-            extract_mock,
             load_sources_mock,
             load_payload_mock):
         """StreamAlert Class - Run, Loaded Payload Fail"""
@@ -118,30 +103,24 @@ class TestStreamAlert(object):
         )
 
     @patch('stream_alert.rule_processor.handler.StreamRules.process')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_with_alert(self, extract_mock, rules_mock):
+    def test_run_with_alert(self, rules_mock):
         """StreamAlert Class - Run, With Alert"""
-        extract_mock.return_value = ('kinesis', 'unit_test_default_stream')
         rules_mock.return_value = (['success!!'], ['normalized_records'])
 
         passed = self.__sa_handler.run(get_valid_event())
 
         assert_true(passed)
 
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_alert_count(self, extract_mock):
+    def test_run_alert_count(self):
         """StreamAlert Class - Run, Check Count With 4 Logs"""
         count = 4
-        extract_mock.return_value = ('kinesis', 'unit_test_default_stream')
         self.__sa_handler.run(get_valid_event(count))
         assert_equal(self.__sa_handler._processed_record_count, count)
 
     @patch('logging.Logger.debug')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_no_alerts(self, extract_mock, log_mock):
+    def test_run_no_alerts(self, log_mock):
         """StreamAlert Class - Run, With No Alerts"""
-        extract_mock.return_value = ('kinesis', 'unit_test_default_stream')
-        self.__sa_handler.run(get_valid_event())
+        self.__sa_handler.run(get_valid_event(1, service='kinesis', resource='unit_test_default_stream'))
 
         calls = [call('Processed %d valid record(s) that resulted in %d alert(s).', 1, 0),
                  call('Invalid record count: %d', 0),
@@ -150,11 +129,9 @@ class TestStreamAlert(object):
         log_mock.assert_has_calls(calls)
 
     @patch('logging.Logger.error')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_invalid_data(self, extract_mock, log_mock):
+    def test_run_invalid_data(self, log_mock):
         """StreamAlert Class - Run, Invalid Data"""
-        extract_mock.return_value = ('kinesis', 'unit_test_default_stream')
-        event = get_valid_event()
+        event = get_valid_event(1, service='kinesis', resource='unit_test_default_stream')
 
         # Replace the good log data with bad data
         event['Records'][0]['kinesis']['data'] = base64.b64encode('{"bad": "data"}')
@@ -188,10 +165,8 @@ class TestStreamAlert(object):
 
     @patch('logging.Logger.debug')
     @patch('stream_alert.rule_processor.handler.StreamRules.process')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_debug_log_alert(self, extract_mock, rules_mock, log_mock):
+    def test_run_debug_log_alert(self, rules_mock, log_mock):
         """StreamAlert Class - Run, Debug Log Alert"""
-        extract_mock.return_value = ('kinesis', 'unit_test_default_stream')
         rules_mock.return_value = (['success!!'], ['normalized_records'])
 
         # Cache the logger level
@@ -200,29 +175,20 @@ class TestStreamAlert(object):
         # Increase the logger level to debug
         LOGGER.setLevel(logging.DEBUG)
 
-        self.__sa_handler.run(get_valid_event())
+        self.__sa_handler.run(get_valid_event(1, stream_name='unit_test_default_stream'))
 
         # Reset the logger level
         LOGGER.setLevel(log_level)
 
         log_mock.assert_called_with('Alerts:\n%s', '[\n  "success!!"\n]')
 
-    @patch('stream_alert.rule_processor.handler.load_stream_payload')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.load_sources')
-    @patch('stream_alert.rule_processor.handler.StreamClassifier.extract_service_and_entity')
-    def test_run_no_payload_class(
-            self,
-            extract_mock,
-            load_sources_mock,
-            load_payload_mock):
+    @patch('logging.Logger.error')
+    def test_run_no_payload_class(self, log_mock):
         """StreamAlert Class - Run, No Payload Class"""
-        extract_mock.return_value = ('blah', 'entity')
-        load_sources_mock.return_value = True
-        load_payload_mock.return_value = None
+        raw_record = {'FakeService': {'test': 1}}
+        self.__sa_handler.run({'Records': [raw_record]})
 
-        self.__sa_handler.run({'Records': ['record']})
-
-        load_payload_mock.assert_called()
+        log_mock.assert_called_with('Unsupported service found, skipping...\n%s', raw_record)
 
     @mock_kinesis
     def test_firehose_record_delivery_disabled_logs(self):
