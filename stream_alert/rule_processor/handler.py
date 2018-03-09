@@ -181,7 +181,7 @@ class StreamAlert(object):
 
             LOGGER.debug('Processed %d valid record(s) that resulted in %d alert(s).',
                          len(payload.records),
-                         len(generated_alerts))
+                         len(record_alerts))
 
             # Add all parsed records to the categorized payload dict only if Firehose is enabled
             if self._firehose_client:
@@ -190,11 +190,11 @@ class StreamAlert(object):
                     self._firehose_client.categorized_payloads[payload.log_source].extend(
                         payload.records)
 
-            if not generated_alerts:
+            if not record_alerts:
                 continue
 
             # Extend the list of alerts with any new ones so they can be returned
-            self._alerts.extend(generated_alerts)
+            self._alerts.extend(record_alerts)
 
             if self.enable_alert_processor:
                 self.sinker.sink(record_alerts)

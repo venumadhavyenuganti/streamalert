@@ -407,7 +407,7 @@ class StreamRules(object):
                 And it pre_parsed_record is replaced by normalized record. The
                 reason to pass a copy of payload into Threat Intelligence is because
                 alerts require to include payload metadata (payload.log_source,
-                payload.type, payload.service and payload.entity).
+                payload.type, payload.service and payload.resource).
 
         Returns:
             list: A list of alerts triggered by Threat Intelligence.
@@ -443,7 +443,7 @@ class StreamRules(object):
 
             LOGGER.info('Rule [%s] triggered an alert on log type [%s] from entity \'%s\' '
                         'in service \'%s\'', rule.rule_name, payload.log_source,
-                        payload.entity, payload.service())
+                        payload.resource, payload.service())
             alert = {
                 'record': record,
                 'rule_name': rule.rule_name,
@@ -452,7 +452,7 @@ class StreamRules(object):
                 'log_type': payload.type,
                 'outputs': rule.outputs,
                 'source_service': payload.service(),
-                'source_entity': payload.entity,
+                'source_entity': payload.resource,
                 'context': rule.context}
 
             alerts.append(alert)
